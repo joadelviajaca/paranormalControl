@@ -156,6 +156,14 @@ app.get('/anomalies', authenticateToken, async (req, res) => {
   sendResponse(res, list);
 });
 
+app.get('/anomalies/:id', authenticateToken, async (req, res) => {
+  try {
+    const item = await Anomaly.findById(req.params.id);
+    if (!item) return res.status(404).json({ status: 'error', message: 'Anomalía no encontrada' });
+    sendResponse(res, item);
+  } catch(e) { res.status(500).json({ status: 'error', message: 'Error interno' }); }
+});
+
 app.post('/anomalies', authenticateToken, async (req, res) => {
   const { subject, description, dangerLevel } = req.body;
   if(!subject || !description) return res.status(400).json({ status: 'error', message: 'Datos incompletos' });
