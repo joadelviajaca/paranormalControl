@@ -27,6 +27,7 @@ JSON
 | **GET** | `/auth/validate-token` | Verificar validez de sesión | *Header Token* |
 | **GET** | `/check-codename` | Verificar disponibilidad | `?codeName=AgenteK` |
 
+
 *Nota: El endpoint de Login devuelve el Token. Los datos del usuario (Rol, Nombre, ID) están codificados DENTRO del token (Payload).*
 
 ---

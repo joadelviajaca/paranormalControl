@@ -45,18 +45,19 @@ const AnomalySchema = new mongoose.Schema({
   description: { type: String, required: true },
   dangerLevel: { type: String, enum: ['Safe', 'Euclid', 'Keter'], required: true },
   status: { type: String, enum: ['Contained', 'Breached', 'Unknown'], default: 'Contained' },
-  registeredBy: { type: String }
+  registeredBy: { type: String },
+  // Nuevos campos de fecha
+  discoveryDate: String, 
+  containmentDate: String
 });
 
-// RECURSO EXTRA 1: Equipamiento (Para despistar/CRUD extra)
 const EquipmentSchema = new mongoose.Schema({
   name: { type: String, required: true },
   type: { type: String, enum: ['Weapon', 'Defense', 'Utility'], required: true },
   condition: { type: String, enum: ['New', 'Used', 'Damaged'], default: 'New' },
-  assignedTo: { type: String, default: null } // codeName del agente
+  assignedTo: { type: String, default: null } 
 });
 
-// RECURSO EXTRA 2: Ubicaciones (Solo lectura)
 const LocationSchema = new mongoose.Schema({
   name: { type: String, required: true },
   coordinates: { type: String, required: true },
@@ -81,16 +82,29 @@ const seedDatabase = async () => {
 
     // Anomalías
     await Anomaly.create([
-      { subject: 'OBJ-084', description: 'Nevera que altera el tiempo.', dangerLevel: 'Safe', status: 'Contained', registeredBy: 'Director Faden' },
-      { subject: 'OBJ-102', description: 'Sombra autónoma.', dangerLevel: 'Keter', status: 'Breached', registeredBy: 'Director Faden' },
-      { subject: 'OBJ-333', description: 'Pato de goma psíquico.', dangerLevel: 'Euclid', status: 'Contained', registeredBy: 'Agente Mulder' }
+      { 
+        subject: 'OBJ-084', 
+        description: 'Nevera que altera el tiempo.', 
+        dangerLevel: 'Safe', 
+        status: 'Contained', 
+        registeredBy: 'Director Faden',
+        discoveryDate: '2020-01-01',
+        containmentDate: '2020-01-02'
+      },
+      { 
+        subject: 'OBJ-102', 
+        description: 'Sombra autónoma.', 
+        dangerLevel: 'Keter', 
+        status: 'Breached', 
+        registeredBy: 'Director Faden',
+        discoveryDate: '2021-05-15',
+        containmentDate: '2021-05-20'
+      }
     ]);
 
-    // Equipamiento (Datos de relleno)
+    // Equipamiento
     await Equipment.create([
-      { name: 'Proton Pack V2', type: 'Weapon', condition: 'Used', assignedTo: 'Agente Mulder' },
-      { name: 'PKE Meter', type: 'Utility', condition: 'New', assignedTo: null },
-      { name: 'Holy Water Grenade', type: 'Weapon', condition: 'Damaged', assignedTo: null }
+      { name: 'Proton Pack V2', type: 'Weapon', condition: 'Used', assignedTo: 'Agente Mulder' }
     ]);
 
     // Ubicaciones
@@ -104,7 +118,7 @@ const seedDatabase = async () => {
 };
 
 // --- MIDDLEWARES ---
-app.use((req, res, next) => { setTimeout(next, 300); }); // Latencia
+app.use((req, res, next) => { setTimeout(next, 300); }); 
 
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
@@ -124,7 +138,6 @@ app.post('/auth/login', async (req, res) => {
   const agent = await Agent.findOne({ email });
   if (!agent || !(await bcrypt.compare(password, agent.password))) return res.status(401).json({ status: 'error', message: 'Credenciales incorrectas' });
 
-  // Token sin password
   const payload = { id: agent._id, email: agent.email, codeName: agent.codeName, department: agent.department, clearanceLevel: agent.clearanceLevel };
   const token = jwt.sign(payload, SECRET_KEY, { expiresIn: '1h' });
   sendResponse(res, { token });
@@ -140,14 +153,25 @@ app.post('/auth/register', async (req, res) => {
   sendResponse(res, { message: 'Agente registrado.' }, 201);
 });
 
+app.get('/auth/validate-token', authenticateToken, (req, res) => {
+  sendResponse(res, { valid: true });
+});
+
 app.get('/check-codename', async (req, res) => {
   const { codeName } = req.query;
   const exists = await Agent.exists({ codeName });
   sendResponse(res, { exists: !!exists });
 });
 
-app.get('/auth/validate-token', authenticateToken, (req, res) => {
-  sendResponse(res, { valid: true });
+// --- USERS ROUTER (Corrección aquí: User -> Agent) ---
+app.get('/users', authenticateToken, async (req, res) => {
+  try {
+    const users = await Agent.find({}, 'codeName department'); // <-- CORREGIDO
+    sendResponse(res, users);
+  } catch (e) {
+    console.log('Error al listar personal:', e);
+    res.status(500).json({ status: 'error', message: 'Error al listar personal' });
+  }
 });
 
 // --- ANOMALY ROUTER ---
@@ -164,18 +188,29 @@ app.get('/anomalies/:id', authenticateToken, async (req, res) => {
   } catch(e) { res.status(500).json({ status: 'error', message: 'Error interno' }); }
 });
 
+// POST Anomalías (Corrección: Añadidas fechas)
 app.post('/anomalies', authenticateToken, async (req, res) => {
-  const { subject, description, dangerLevel } = req.body;
+  const { subject, description, dangerLevel, discoveryDate, containmentDate } = req.body; // <-- AÑADIDO
+  
   if(!subject || !description) return res.status(400).json({ status: 'error', message: 'Datos incompletos' });
-  const newItem = await Anomaly.create({ subject, description, dangerLevel, registeredBy: req.user.codeName });
+  
+  const newItem = await Anomaly.create({ 
+    subject, 
+    description, 
+    dangerLevel, 
+    discoveryDate,    // <-- Guardar
+    containmentDate,  // <-- Guardar
+    registeredBy: req.user.codeName 
+  });
   sendResponse(res, newItem, 201);
 });
 
-// PUT /anomalies/:id (Modificar Anomalía)
+// PUT Anomalías (Corrección: Añadidas fechas)
 app.put('/anomalies/:id', authenticateToken, async (req, res) => {
   try {
-    const { description, status, dangerLevel } = req.body;
-    const updated = await Anomaly.findByIdAndUpdate(req.params.id, { description, status, dangerLevel }, { new: true });
+    // Permitimos actualizar todo el body (cuidado en producción real, aquí vale)
+    const updated = await Anomaly.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    
     if (!updated) return res.status(404).json({ status: 'error', message: 'Anomalía no encontrada' });
     sendResponse(res, updated);
   } catch(e) { res.status(500).json({ status: 'error', message: 'Error interno' }); }
@@ -187,7 +222,7 @@ app.delete('/anomalies/:id', authenticateToken, async (req, res) => {
   sendResponse(res, { message: 'Eliminado.' });
 });
 
-// --- EQUIPMENT ROUTER (RECURSO EXTRA PARA DESPISTAR) ---
+// --- EQUIPMENT ROUTER ---
 app.get('/equipment', authenticateToken, async (req, res) => {
   const list = await Equipment.find();
   sendResponse(res, list);
@@ -198,17 +233,7 @@ app.post('/equipment', authenticateToken, async (req, res) => {
   sendResponse(res, newItem, 201);
 });
 
-app.put('/equipment/:id', authenticateToken, async (req, res) => {
-  const updated = await Equipment.findByIdAndUpdate(req.params.id, req.body, { new: true });
-  sendResponse(res, updated);
-});
-
-app.delete('/equipment/:id', authenticateToken, async (req, res) => {
-  await Equipment.findByIdAndDelete(req.params.id);
-  sendResponse(res, { message: 'Item dado de baja.' });
-});
-
-// --- LOCATIONS ROUTER (SOLO LECTURA) ---
+// --- LOCATIONS ROUTER ---
 app.get('/locations', authenticateToken, async (req, res) => {
   const list = await Location.find();
   sendResponse(res, list);
